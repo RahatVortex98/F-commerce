@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\StoreSetting;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use RuntimeException;
@@ -27,7 +28,7 @@ class TemporaryAdminSeeder extends Seeder
         $admin = User::updateOrCreate(
             ['email' => $email],
             [
-                'name' => 'Temporary Store Administrator',
+                'name' => StoreSetting::query()->value('owner_name') ?: config('storefront.owner_name') ?: 'Store Admin',
                 'password' => $password,
             ],
         );

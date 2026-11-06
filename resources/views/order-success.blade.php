@@ -14,7 +14,7 @@
                 <div class="success-payment"><span>Pathao tracking ID</span><strong>{{ $order->courier_tracking_id }}</strong></div>
             @endif
         </div>
-        @if ($order->user_id && auth()->id() === $order->user_id)
+        @if ($order->user_id && auth('customer')->id() === $order->user_id)
             <a class="button button-green success-button" href="{{ route('account.orders.show', $order) }}">Track this order <span aria-hidden="true">→</span></a>
         @else
             <a class="button button-green success-button" href="{{ route('shop') }}">Back to the collection <span aria-hidden="true">→</span></a>

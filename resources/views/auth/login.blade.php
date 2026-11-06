@@ -30,7 +30,6 @@
             </form>
 
             <p class="account-auth-switch">New here? <a href="{{ route('customer.register') }}">Create an account</a></p>
-            <p class="account-auth-switch">Store administrator? <a href="{{ route('filament.bikrify.auth.login') }}">Admin sign in</a></p>
         </div>
     </section>
 @endsection

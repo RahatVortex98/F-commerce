@@ -5,6 +5,7 @@ namespace App\Providers\Filament;
 use App\Filament\Widgets\OrderStatusChart;
 use App\Filament\Widgets\OrderVolumeChart;
 use App\Filament\Widgets\StoreOverview;
+use App\Models\StoreSetting;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -30,6 +31,8 @@ class BikrifyPanelProvider extends PanelProvider
             ->id('bikrify')
             ->path('bikrify')
             ->login()
+            ->authGuard('admin')
+            ->brandName(fn (): string => StoreSetting::query()->value('store_name') ?: config('app.name'))
             ->databaseNotifications()
             ->colors([
                 'primary' => Color::Amber,

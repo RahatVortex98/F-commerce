@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\StoreSetting;
 use App\Models\User;
 use Database\Seeders\TemporaryAdminSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -11,6 +12,11 @@ it('creates and updates the temporary administrator from configured credentials'
     config([
         'temporary_admin.email' => 'admin@example.test',
         'temporary_admin.password' => 'admin-temp-pass1',
+        'storefront.owner_name' => 'Fallback Owner',
+    ]);
+    StoreSetting::query()->create([
+        'store_name' => 'Spider Man',
+        'owner_name' => 'Spidy',
     ]);
 
     $seeder = new TemporaryAdminSeeder;
@@ -22,6 +28,7 @@ it('creates and updates the temporary administrator from configured credentials'
     $this->assertModelExists($admin);
     expect(Hash::check('admin-temp-pass1', $admin->password))->toBeTrue();
     expect($admin->is_admin)->toBeTrue();
+    expect($admin->name)->toBe('Spidy');
 
     config(['temporary_admin.password' => 'admin-temp-pass2']);
     $seeder->run();

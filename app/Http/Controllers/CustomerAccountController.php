@@ -12,7 +12,7 @@ class CustomerAccountController extends Controller
 {
     public function index(Request $request): View
     {
-        $customer = $request->user();
+        $customer = $request->user('customer');
         $orders = $customer->orders()
             ->with('product')
             ->latest()
@@ -31,7 +31,7 @@ class CustomerAccountController extends Controller
 
     public function show(Request $request, Order $order): View
     {
-        $order = $request->user()->orders()
+        $order = $request->user('customer')->orders()
             ->with('product')
             ->whereKey($order->getKey())
             ->firstOrFail();
@@ -42,7 +42,7 @@ class CustomerAccountController extends Controller
     public function confirmReceived(Request $request, Order $order): RedirectResponse
     {
         DB::transaction(function () use ($request, $order): void {
-            $customerOrder = $request->user()->orders()
+            $customerOrder = $request->user('customer')->orders()
                 ->lockForUpdate()
                 ->findOrFail($order->getKey());
 

@@ -12,7 +12,7 @@
                 <h2>Make it yours<span class="heading-period">.</span></h2>
                 <p class="checkout-intro">We’ll confirm your order before it heads your way.</p>
                 <p class="checkout-intro">We’ll text a one-time code to verify your number before dispatch.</p>
-                <p class="checkout-intro">Ordering as {{ auth()->user()->name }}.</p>
+                <p class="checkout-intro">Ordering as {{ auth('customer')->user()->name }}.</p>
 
                 @if ($errors->any())
                     <div class="form-errors" role="alert"><strong>Please check your details.</strong><ul>@foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>

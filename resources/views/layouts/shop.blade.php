@@ -62,8 +62,8 @@
                     </details>
                 @endif
                 <a href="{{ route('shop') }}#contact">Contact us</a>
-                @auth
-                    <a href="{{ route('account.dashboard') }}">My account</a>
+                @auth('customer')
+                    <a href="{{ route('account.dashboard') }}" aria-label="My account for {{ auth('customer')->user()->name }}">{{ auth('customer')->user()->name }}</a>
                     <form class="nav-logout" method="POST" action="{{ route('customer.logout') }}">
                         @csrf
                         <button type="submit">Log out</button>
@@ -72,7 +72,6 @@
                     <a href="{{ route('customer.login') }}">Login</a>
                     <a href="{{ route('customer.register') }}">Register</a>
                 @endauth
-                <a href="{{ route('filament.bikrify.auth.login') }}">Admin</a>
             </nav>
         </div>
     </header>

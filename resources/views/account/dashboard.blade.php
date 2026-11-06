@@ -4,7 +4,7 @@
     <section class="content-shell account-shell">
         <header class="account-heading">
             <span class="eyebrow">YOUR ACCOUNT</span>
-            <h2>Good to see you, {{ auth()->user()->name }}<span class="heading-period">.</span></h2>
+            <h2>Good to see you, {{ auth('customer')->user()->name }}<span class="heading-period">.</span></h2>
             <p>Keep an eye on your orders from confirmation all the way to delivery.</p>
         </header>
 

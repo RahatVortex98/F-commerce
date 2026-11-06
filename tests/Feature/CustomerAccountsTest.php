@@ -3,6 +3,7 @@
 use App\Models\Category;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\StoreSetting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -49,7 +50,8 @@ it('registers a customer and signs them in', function () {
         'is_admin' => true,
     ])->assertRedirect(route('account.dashboard'));
 
-    $this->assertAuthenticated();
+    $customer = User::query()->where('email', 'samira@example.test')->firstOrFail();
+    $this->assertAuthenticatedAs($customer, 'customer');
     $this->assertDatabaseHas('users', [
         'name' => 'Samira Ahmed',
         'email' => 'samira@example.test',
@@ -68,7 +70,59 @@ it('lets registered customers sign in', function () {
         'password' => 'Customer123!',
     ])->assertRedirect(route('account.dashboard'));
 
-    $this->assertAuthenticatedAs($customer);
+    $this->assertAuthenticatedAs($customer, 'customer');
+});
+
+it('keeps administrator credentials and sessions out of customer pages', function () {
+    $admin = User::factory()->create([
+        'email' => 'admin@example.test',
+        'password' => 'AdminPassword123!',
+        'is_admin' => true,
+    ]);
+
+    $this->actingAs($admin, 'admin')
+        ->post(route('customer.login.store'), [
+            'email' => 'admin@example.test',
+            'password' => 'AdminPassword123!',
+        ])
+        ->assertSessionHasErrors('email');
+
+    $this->assertGuest('customer');
+    $this->assertAuthenticatedAs($admin, 'admin');
+    $this->get(route('account.dashboard'))->assertRedirect(route('customer.login'));
+
+    $product = createCustomerAccountTestProduct();
+    $this->get(route('checkout', $product))->assertRedirect(route('customer.login'));
+});
+
+it('shows the signed-in customer name without an admin entry in storefront navigation', function () {
+    $customer = User::factory()->create(['name' => 'Samira Ahmed']);
+
+    $this->actingAs($customer, 'customer')
+        ->get(route('shop'))
+        ->assertOk()
+        ->assertSeeText('Samira Ahmed')
+        ->assertDontSee('Admin');
+});
+
+it('hides the administrator sign-in link from the customer login page', function () {
+    $this->get(route('customer.login'))
+        ->assertOk()
+        ->assertDontSee('Admin')
+        ->assertDontSee('Store administrator');
+});
+
+it('logs out a customer without ending the administrator session', function () {
+    $admin = User::factory()->create(['is_admin' => true]);
+    $customer = User::factory()->create();
+
+    $this->actingAs($admin, 'admin')
+        ->actingAs($customer, 'customer')
+        ->post(route('customer.logout'))
+        ->assertRedirect(route('shop'));
+
+    $this->assertGuest('customer');
+    $this->assertAuthenticatedAs($admin, 'admin');
 });
 
 it('requires a customer account before checkout', function () {
@@ -87,9 +141,10 @@ it('limits order visibility to its customer and allows receipt confirmation afte
     ]);
     $otherOrder = createCustomerAccountTestOrder($otherCustomer, $product);
 
-    $this->actingAs($customer)
+    $this->actingAs($customer, 'customer')
         ->get(route('account.dashboard'))
         ->assertOk()
+        ->assertSeeText('Good to see you, '.$customer->name)
         ->assertSee($customerOrder->order_number)
         ->assertDontSee($otherOrder->order_number);
 
@@ -108,7 +163,7 @@ it('does not allow customers to confirm an order that is not delivered', functio
         'status' => 'shipped',
     ]);
 
-    $this->actingAs($customer)
+    $this->actingAs($customer, 'customer')
         ->post(route('account.orders.received', $order))
         ->assertStatus(409);
 
@@ -120,18 +175,25 @@ it('shows admin dashboard summaries only to administrators', function () {
     config(['temporary_admin.email' => null]);
 
     $customer = User::factory()->create();
-    $this->actingAs($customer)->get('/bikrify')->assertForbidden();
+    $this->actingAs($customer, 'customer')->get('/bikrify')->assertRedirect();
 
     $admin = User::factory()->create();
+    $admin->name = 'Spidy';
     $admin->forceFill(['is_admin' => true])->save();
+    StoreSetting::query()->create([
+        'store_name' => 'Spider Man',
+        'owner_name' => 'Spidy',
+    ]);
     $product = createCustomerAccountTestProduct();
     createCustomerAccountTestOrder($customer, $product, ['status' => 'delivered']);
 
-    $this->actingAs($admin)
+    $this->actingAs($admin, 'admin')
         ->get('/bikrify')
         ->assertOk()
         ->assertSeeText('Active products')
         ->assertSeeText('Customer accounts')
         ->assertSeeText('Orders by status')
-        ->assertSeeText('Orders over the last 7 days');
+        ->assertSeeText('Orders over the last 7 days')
+        ->assertSeeText('Spider Man')
+        ->assertSeeText('Spidy');
 });

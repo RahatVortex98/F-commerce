@@ -27,9 +27,10 @@ class CustomerAuthController extends Controller
         $credentials = [
             'email' => Str::lower($validated['email']),
             'password' => $validated['password'],
+            'is_admin' => false,
         ];
 
-        if (! Auth::attempt($credentials, $request->boolean('remember'))) {
+        if (! Auth::guard('customer')->attempt($credentials, $request->boolean('remember'))) {
             return back()
                 ->withErrors(['email' => 'These credentials do not match our records.'])
                 ->onlyInput('email');
@@ -64,7 +65,7 @@ class CustomerAuthController extends Controller
             'password' => $validated['password'],
         ]);
 
-        Auth::login($user);
+        Auth::guard('customer')->login($user);
         $request->session()->regenerate();
 
         return redirect()->intended(route('account.dashboard'));
@@ -72,9 +73,9 @@ class CustomerAuthController extends Controller
 
     public function logout(Request $request): RedirectResponse
     {
-        Auth::logout();
+        Auth::guard('customer')->logout();
 
-        $request->session()->invalidate();
+        $request->session()->regenerate();
         $request->session()->regenerateToken();
 
         return redirect()->route('shop');
