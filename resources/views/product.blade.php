@@ -47,7 +47,7 @@
                 @endif
                 <div class="detail-rule"></div>
                 <p class="detail-description">{{ $product->description ?: 'A thoughtfully picked everyday favourite, ready to make its way to you.' }}</p>
-                @if ($product->stock !== null)
+                @if (!$product->variants && $product->stock !== null)
                     <div class="product-availability">
                         <h3>QTY (available)</h3>
                         <p class="total-stock" role="status">{{ $product->stock }}</p>
@@ -56,6 +56,12 @@
                 @if ($product->variants)
                     @php
                         $variantLabel = $product->product_kind === 'watch' ? 'Color' : (in_array($product->product_kind, ['shirt', 'pant'], true) ? 'Size' : 'Option');
+                        $hasAvailableVariant = collect($product->variants)->contains(function ($variant) use ($product): bool {
+                            $inventory = $product->productVariants->firstWhere('value', $variant['value'] ?? '');
+                            $stock = $inventory?->stock ?? $product->stock;
+
+                            return $stock === null || $stock > 0;
+                        });
                         $measurementColumns = match ($product->product_kind) {
                             'shirt' => ['chest_cm' => 'Chest (cm)', 'body_length_cm' => 'Length (cm)', 'shoulder_cm' => 'Shoulder (cm)', 'sleeve_cm' => 'Sleeve (cm)'],
                             'pant' => ['waist_cm' => 'Waist (cm)', 'hip_cm' => 'Hip (cm)', 'outseam_cm' => 'Pant length (cm)', 'inseam_cm' => 'Inseam (cm)'],
@@ -63,6 +69,14 @@
                         };
                         $chartVariants = collect($product->variants)->filter(fn ($variant) => collect($measurementColumns)->keys()->contains(fn ($key) => filled($variant[$key] ?? null)));
                     @endphp
+                    <div class="product-availability">
+                        <h3>AVAILABLE {{ strtoupper($variantLabel).'S' }}</h3>
+                        @foreach ($product->variants as $variant)
+                            @php($inventory = $product->productVariants->firstWhere('value', $variant['value'] ?? ''))
+                            @php($availableStock = $inventory?->stock ?? $product->stock)
+                            <p>{{ $variant['value'] }} · {{ $availableStock === null ? 'Stock not tracked' : number_format($availableStock).' available'.($inventory?->stock === null && $product->stock !== null ? ' across options' : '') }}</p>
+                        @endforeach
+                    </div>
                     @if ($chartVariants->isNotEmpty())
                         <div class="size-chart">
                             <h3>{{ $product->product_kind === 'shirt' ? 'Shirt size chart' : 'Pant size chart' }}</h3>
@@ -74,7 +88,7 @@
                         </div>
                     @endif
                 @endif
-                @if (!$product->variants || (int) ($product->stock ?? 0) > 0)
+                @if (!$product->variants || $hasAvailableVariant)
                     <a class="button button-green" href="{{ route('checkout', $product) }}">Order with cash on delivery <span aria-hidden="true">→</span></a>
                 @else
                     <p class="product-sold-out" role="status">Currently sold out</p>

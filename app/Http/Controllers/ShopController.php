@@ -19,6 +19,7 @@ class ShopController extends Controller
     public function show(Product $product)
     {
         abort_unless($product->active, 404);
+        $product->load('productVariants');
 
         return view('product', compact('product'));
     }

@@ -4,11 +4,13 @@
     @php
         $steps = [
             'pending' => 'Order placed',
+            'hold' => 'On hold',
             'confirmed' => 'Confirmed by the store',
             'shipped' => 'On the way',
             'delivered' => 'Delivered',
         ];
-        $currentStep = array_search($order->status, array_keys($steps), true);
+        $statusValue = $order->status->value;
+        $currentStep = array_search($statusValue, array_keys($steps), true);
     @endphp
 
     <section class="content-shell account-shell">
@@ -24,15 +26,15 @@
             <div class="account-notice" role="status">{{ session('status') }}</div>
         @endif
 
-        @if (in_array($order->status, ['cancelled', 'returned'], true))
+        @if (in_array($statusValue, ['cancelled', 'returned'], true))
             <div class="account-notice account-notice-muted" role="status">
-                This order was {{ $order->status }}. Contact the store if you need help.
+                This order was {{ $order->status->label() }}. Contact the store if you need help.
             </div>
         @else
             <ol class="order-progress" aria-label="Order progress">
                 @foreach ($steps as $stepStatus => $stepLabel)
                     @php($stepIndex = array_search($stepStatus, array_keys($steps), true))
-                    <li class="order-progress-step {{ $stepIndex <= $currentStep ? 'is-complete' : '' }}" @if ($stepStatus === $order->status) aria-current="step" @endif>
+                    <li class="order-progress-step {{ $stepIndex <= $currentStep ? 'is-complete' : '' }}" @if ($stepStatus === $statusValue) aria-current="step" @endif>
                         <span class="order-progress-dot" aria-hidden="true"></span>
                         <span>{{ $stepLabel }}</span>
                     </li>
@@ -42,13 +44,17 @@
 
         <div class="account-detail-grid">
             <article class="account-detail-card">
-                <span class="eyebrow">YOUR ITEM</span>
-                <h3>{{ $order->product->name }}@if ($order->variant_value) <span>· {{ $order->variant_value }}</span>@endif</h3>
+                <span class="eyebrow">YOUR ITEMS</span>
                 <dl class="account-detail-list">
-                    <div><dt>Quantity</dt><dd>{{ $order->quantity }}</dd></div>
+                    @foreach ($order->items as $item)
+                        <div>
+                            <dt>{{ $item->product_name }}@if ($item->variant_value) · {{ $item->variant_value }}@endif</dt>
+                            <dd>{{ $item->quantity }} × ৳{{ number_format($item->unit_price, 2) }}</dd>
+                        </div>
+                    @endforeach
                     <div><dt>Order total</dt><dd>৳{{ number_format($order->total, 2) }}</dd></div>
                     <div><dt>Payment</dt><dd>Cash on delivery</dd></div>
-                    <div><dt>Order status</dt><dd><span class="account-status account-status-{{ $order->status }}">{{ str($order->status)->headline() }}</span></dd></div>
+                    <div><dt>Order status</dt><dd><span class="account-status account-status-{{ $statusValue }}">{{ $order->status->label() }}</span></dd></div>
                 </dl>
             </article>
 
@@ -65,13 +71,13 @@
             </article>
         </div>
 
-        @if ($order->status === 'shipped' && $order->courier_tracking_id)
+        @if ($order->status === \App\Enums\OrderStatus::Shipped && $order->courier_tracking_id)
             <p class="account-delivery-note">Your order is on its way. Use the tracking ID above for courier updates.</p>
-        @elseif ($order->status === 'shipped')
+        @elseif ($order->status === \App\Enums\OrderStatus::Shipped)
             <p class="account-delivery-note">Your order is on its way. The store will share tracking details when available.</p>
         @endif
 
-        @if ($order->status === 'delivered' && $order->customer_received_at === null)
+        @if ($order->status === \App\Enums\OrderStatus::Delivered && $order->customer_received_at === null)
             <form class="account-received-form" method="POST" action="{{ route('account.orders.received', $order) }}">
                 @csrf
                 <div>

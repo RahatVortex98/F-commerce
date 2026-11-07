@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\OrderStatus;
 use App\Models\Order;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -14,7 +15,7 @@ class CustomerAccountController extends Controller
     {
         $customer = $request->user('customer');
         $orders = $customer->orders()
-            ->with('product')
+            ->with('items')
             ->latest()
             ->paginate(10);
         $orderCounts = $customer->orders()
@@ -25,14 +26,18 @@ class CustomerAccountController extends Controller
         return view('account.dashboard', [
             'orders' => $orders,
             'orderCount' => $orderCounts->sum(),
-            'activeOrderCount' => $orderCounts->only(['pending', 'confirmed', 'shipped'])->sum(),
+            'activeOrderCount' => $orderCounts->only([
+                OrderStatus::Pending->value,
+                OrderStatus::Confirmed->value,
+                OrderStatus::Shipped->value,
+            ])->sum(),
         ]);
     }
 
     public function show(Request $request, Order $order): View
     {
         $order = $request->user('customer')->orders()
-            ->with('product')
+            ->with('items')
             ->whereKey($order->getKey())
             ->firstOrFail();
 
@@ -50,7 +55,7 @@ class CustomerAccountController extends Controller
                 return;
             }
 
-            abort_unless($customerOrder->status === 'delivered', 409);
+            abort_unless($customerOrder->status === OrderStatus::Delivered, 409);
 
             $customerOrder->forceFill(['customer_received_at' => now()])->save();
         });

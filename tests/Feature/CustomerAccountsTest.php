@@ -28,7 +28,7 @@ function createCustomerAccountTestProduct(): Product
 
 function createCustomerAccountTestOrder(User $customer, Product $product, array $attributes = []): Order
 {
-    return Order::query()->create(array_merge([
+    $order = Order::query()->create(array_merge([
         'order_number' => 'BK-'.Str::upper(Str::random(10)),
         'user_id' => $customer->id,
         'product_id' => $product->id,
@@ -39,6 +39,17 @@ function createCustomerAccountTestOrder(User $customer, Product $product, array 
         'total' => 100,
         'status' => 'pending',
     ], $attributes));
+
+    $order->items()->create([
+        'product_id' => $product->id,
+        'product_name' => $product->name,
+        'variant_value' => $order->variant_value,
+        'unit_price' => (float) $order->total / max(1, $order->quantity),
+        'quantity' => $order->quantity,
+        'line_total' => $order->total,
+    ]);
+
+    return $order;
 }
 
 it('registers a customer and signs them in', function () {
@@ -149,6 +160,11 @@ it('limits order visibility to its customer and allows receipt confirmation afte
         ->assertDontSee($otherOrder->order_number);
 
     $this->get(route('account.orders.show', $otherOrder))->assertNotFound();
+    $product->update(['name' => 'Renamed after purchase']);
+    $this->get(route('account.orders.show', $customerOrder))
+        ->assertOk()
+        ->assertSeeText('Test product')
+        ->assertSeeText('Delivered');
 
     $this->post(route('account.orders.received', $customerOrder))
         ->assertRedirect(route('account.orders.show', $customerOrder));

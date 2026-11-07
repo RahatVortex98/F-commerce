@@ -2,7 +2,9 @@
 
 namespace App\Filament\Resources;
 
+use App\Enums\OrderStatus;
 use App\Filament\Resources\OrderResource\Pages;
+use App\Filament\Resources\OrderResource\RelationManagers\StatusHistoriesRelationManager;
 use App\Jobs\CreatePathaoShipment;
 use App\Models\Order;
 use Filament\Forms;
@@ -46,16 +48,9 @@ class OrderResource extends Resource
                     ->required()
                     ->numeric(),
                 Forms\Components\Select::make('status')
-                    ->required()
-                    ->options([
-                        'pending' => 'Pending',
-                        'confirmed' => 'Confirmed',
-                        'shipped' => 'Shipped',
-                        'delivered' => 'Delivered',
-                        'returned' => 'Returned',
-                        'cancelled' => 'Cancelled',
-                    ])
-                    ->default('pending'),
+                    ->options(OrderStatus::options())
+                    ->disabled()
+                    ->dehydrated(false),
                 Forms\Components\TextInput::make('courier_name')
                     ->disabled()
                     ->dehydrated(),
@@ -74,6 +69,9 @@ class OrderResource extends Resource
                 Tables\Columns\TextColumn::make('product.name')
                     ->numeric()
                     ->sortable(),
+                Tables\Columns\TextColumn::make('items.product_name')
+                    ->label('Items')
+                    ->listWithLineBreaks(),
                 Tables\Columns\TextColumn::make('quantity')
                     ->numeric()
                     ->sortable(),
@@ -95,15 +93,10 @@ class OrderResource extends Resource
                 Tables\Columns\TextColumn::make('total')
                     ->numeric()
                     ->sortable(),
-                Tables\Columns\BadgeColumn::make('status')
-                    ->colors([
-                        'warning' => 'pending',
-                        'info' => 'confirmed',
-                        'primary' => 'shipped',
-                        'success' => 'delivered',
-                        'danger' => 'returned',
-                        'gray' => 'cancelled',
-                    ])
+                Tables\Columns\TextColumn::make('status')
+                    ->badge()
+                    ->formatStateUsing(fn (Order $record): string => $record->status->label())
+                    ->color(fn (Order $record): string => $record->status->color())
                     ->searchable(),
                 Tables\Columns\TextColumn::make('courier_name')
                     ->searchable(),
@@ -145,14 +138,7 @@ class OrderResource extends Resource
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
-                    ->options([
-                        'pending' => 'Pending',
-                        'confirmed' => 'Confirmed',
-                        'shipped' => 'Shipped',
-                        'delivered' => 'Delivered',
-                        'returned' => 'Returned',
-                        'cancelled' => 'Cancelled',
-                    ]),
+                    ->options(OrderStatus::options()),
             ])
             ->actions([
                 Action::make('confirmOrder')
@@ -177,9 +163,9 @@ class OrderResource extends Resource
                             }
 
                             $shouldBookCourier = config('courierhub.couriers.pathao.enabled');
+                            $order->transitionTo(OrderStatus::Confirmed, auth()->user(), null, 'admin');
                             $order->forceFill([
                                 'owner_confirmed_at' => now(),
-                                'status' => 'confirmed',
                                 'courier_booking_status' => $shouldBookCourier ? 'queued' : 'not_configured',
                                 'courier_booking_error' => null,
                             ])->save();
@@ -211,17 +197,10 @@ class OrderResource extends Resource
                                 return;
                             }
 
-                            if ($order->variant_stock_reduced) {
-                                $product = $order->product()->lockForUpdate()->firstOrFail();
-                                if ($product->stock !== null) {
-                                    $product->increment('stock', $order->quantity);
-                                }
-                            }
-
+                            $order->transitionTo(OrderStatus::Cancelled, auth()->user(), 'Rejected by store staff.', 'admin');
                             $order->forceFill([
                                 'owner_rejected_at' => now(),
                                 'variant_stock_reduced' => false,
-                                'status' => 'cancelled',
                                 'courier_booking_status' => 'rejected_by_owner',
                             ])->save();
                         });
@@ -254,18 +233,15 @@ class OrderResource extends Resource
                             ->send();
                     }),
                 Tables\Actions\EditAction::make(),
+                Tables\Actions\DeleteAction::make(),
             ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
-            ]);
+            ->bulkActions([]);
     }
 
     public static function getRelations(): array
     {
         return [
-            //
+            StatusHistoriesRelationManager::class,
         ];
     }
 

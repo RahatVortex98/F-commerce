@@ -30,12 +30,15 @@
                 <a class="account-order-card" href="{{ route('account.orders.show', $order) }}">
                     <div class="account-order-topline">
                         <span class="account-order-number">{{ $order->order_number }}</span>
-                        <span class="account-status account-status-{{ $order->status }}">{{ str($order->status)->headline() }}</span>
+                        <span class="account-status account-status-{{ $order->status->value }}">{{ $order->status->label() }}</span>
                     </div>
                     <div class="account-order-content">
                         <div>
-                            <h4>{{ $order->product->name }}@if ($order->variant_value) <span>· {{ $order->variant_value }}</span>@endif</h4>
-                            <p>Quantity {{ $order->quantity }} · Placed {{ $order->created_at->format('M j, Y') }}</p>
+                            @foreach ($order->items as $item)
+                                <h4>{{ $item->product_name }}@if ($item->variant_value) <span>· {{ $item->variant_value }}</span>@endif</h4>
+                                <p>Quantity {{ $item->quantity }}</p>
+                            @endforeach
+                            <p>Placed {{ $order->created_at->format('M j, Y') }}</p>
                         </div>
                         <strong>৳{{ number_format($order->total, 2) }}</strong>
                     </div>

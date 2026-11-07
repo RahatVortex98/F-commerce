@@ -64,19 +64,6 @@ class PhoneVerificationController extends Controller
                 return ['order' => null, 'newly_verified' => false];
             }
 
-            if ($order->variant_value && ! $order->variant_stock_reduced) {
-                $product = $order->product()->lockForUpdate()->firstOrFail();
-                $variants = $product->variants ?? [];
-                $variantIndex = collect($variants)->search(fn (array $variant): bool => ($variant['value'] ?? null) === $order->variant_value);
-
-                if ($variantIndex === false || (int) ($product->stock ?? 0) < $order->quantity) {
-                    return ['order' => null, 'newly_verified' => false, 'out_of_stock' => true];
-                }
-
-                $product->forceFill(['stock' => $product->stock - $order->quantity])->save();
-                $order->variant_stock_reduced = true;
-            }
-
             $order->forceFill([
                 'phone_verified_at' => now(),
                 'phone_verification_hash' => null,
@@ -90,10 +77,6 @@ class PhoneVerificationController extends Controller
 
         $order = $result['order'];
 
-        if ($result['out_of_stock'] ?? false) {
-            return back()->withErrors(['code' => 'That size or color has just sold out. Please contact the store to choose another option.']);
-        }
-
         if (! $order || ! $order->phone_verified_at) {
             return back()->withErrors(['code' => 'That code is invalid or expired. Request a new code and try again.']);
         }
@@ -102,9 +85,12 @@ class PhoneVerificationController extends Controller
             return redirect()->route('order.success', $token);
         }
 
+        $itemDescription = $order->items
+            ->map(fn ($item): string => $item->product_name.($item->variant_value ? " ({$item->variant_value})" : '')." × {$item->quantity}")
+            ->implode(', ');
         $notification = Notification::make()
             ->title('New order awaits confirmation')
-            ->body("{$order->order_number}: {$order->product?->name} × {$order->quantity}".($order->variant_value ? " ({$order->variant_value})" : '').'. Review and confirm in Orders before dispatch.')
+            ->body("{$order->order_number}: {$itemDescription}. Review and confirm in Orders before dispatch.")
             ->icon('heroicon-o-shopping-bag')
             ->toDatabase();
 
@@ -171,7 +157,7 @@ class PhoneVerificationController extends Controller
 
     public function success(string $token): View|RedirectResponse
     {
-        $order = Order::query()->with('product')->where('public_token', $token)->firstOrFail();
+        $order = Order::query()->with('items')->where('public_token', $token)->firstOrFail();
 
         if (! $order->phone_verified_at) {
             return redirect()->route('order.verify', $token);

@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Contracts\SmsGateway;
+use App\Enums\OrderStatus;
+use App\Exceptions\InvalidOrderTransitionException;
 use App\Models\Category;
 use App\Models\Order;
 use App\Models\Product;
@@ -13,6 +15,7 @@ use CourierHub\Events\CourierWebhookReceived;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
@@ -53,17 +56,24 @@ class AppServiceProvider extends ServiceProvider
             }
 
             $status = match ($webhook->status) {
-                CourierStatus::Pending => 'pending',
-                CourierStatus::Confirmed => 'confirmed',
-                CourierStatus::PickedUp, CourierStatus::InTransit, CourierStatus::OutForDelivery => 'shipped',
-                CourierStatus::Delivered, CourierStatus::PartialDelivered => 'delivered',
-                CourierStatus::Cancelled => 'cancelled',
-                CourierStatus::ReturnInTransit, CourierStatus::Returned, CourierStatus::Failed => 'returned',
+                CourierStatus::Pending => OrderStatus::Pending,
+                CourierStatus::Confirmed => OrderStatus::Confirmed,
+                CourierStatus::PickedUp, CourierStatus::InTransit, CourierStatus::OutForDelivery => OrderStatus::Shipped,
+                CourierStatus::Delivered, CourierStatus::PartialDelivered => OrderStatus::Delivered,
+                CourierStatus::Cancelled => OrderStatus::Cancelled,
+                CourierStatus::ReturnInTransit, CourierStatus::Returned, CourierStatus::Failed => OrderStatus::Returned,
                 default => null,
             };
 
             if ($status) {
-                $order->update(['status' => $status]);
+                try {
+                    $order->transitionTo($status, note: 'Courier webhook status update.', source: 'courier');
+                } catch (InvalidOrderTransitionException) {
+                    Log::warning('Ignored invalid courier order status transition.', [
+                        'order_id' => $order->id,
+                        'status' => $status->value,
+                    ]);
+                }
             }
         });
 

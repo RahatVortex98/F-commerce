@@ -3,13 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Contracts\SmsGateway;
+use App\Enums\OrderStatus;
+use App\Exceptions\StockUnavailableException;
 use App\Models\BlacklistedPhone;
 use App\Models\Order;
 use App\Models\Product;
 use App\Services\BangladeshPhoneNumber;
+use App\Services\StockService;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
@@ -23,27 +27,47 @@ class CheckoutController extends Controller
     public function create(Product $product): View
     {
         abort_unless($product->active, 404);
+        $product->load('productVariants');
 
         return view('checkout', compact('product'));
     }
 
-    public function store(Request $request, Product $product, BangladeshPhoneNumber $phones, SmsGateway $sms): RedirectResponse
-    {
-        abort_unless($product->active, 404);
-
+    public function store(
+        Request $request,
+        Product $product,
+        BangladeshPhoneNumber $phones,
+        SmsGateway $sms,
+        StockService $stock,
+    ): RedirectResponse {
         if ($request->filled('website')) {
             abort(422);
         }
 
-        $validated = $request->validate([
+        $checkoutToken = $request->validate([
             'checkout_token' => ['required', 'uuid'],
+        ])['checkout_token'];
+
+        $existing = Order::query()->where('checkout_token', $checkoutToken)->first();
+        if ($existing) {
+            return redirect()->route($existing->phone_verified_at ? 'order.success' : 'order.verify', $existing->public_token);
+        }
+
+        abort_unless($product->active, 404);
+
+        $variantValue = $request->input('variant_value');
+        $selectedVariant = is_string($variantValue)
+            ? $product->productVariants()->where('value', $variantValue)->first()
+            : null;
+        $maxQuantity = max(20, (int) ($selectedVariant?->stock ?? $product->stock ?? 0));
+
+        $validated = $request->validate([
             'phone' => ['required', 'string', 'max:30'],
             'address' => ['required', 'string', 'max:1000'],
             'quantity' => [
                 'required',
                 'integer',
                 'min:1',
-                'max:'.max(1, (int) ($product->stock ?? 20)),
+                'max:'.$maxQuantity,
             ],
             'variant_value' => array_merge(
                 $product->variants ? ['required'] : ['nullable'],
@@ -53,6 +77,7 @@ class CheckoutController extends Controller
             'zone_id' => [config('courierhub.couriers.pathao.enabled') ? 'required' : 'nullable', 'integer', 'min:1'],
             'area_id' => [config('courierhub.couriers.pathao.enabled') ? 'required' : 'nullable', 'integer', 'min:1'],
         ]);
+        $validated['checkout_token'] = $checkoutToken;
 
         $phone = $phones->normalize($validated['phone']);
         if (! $phone) {
@@ -70,42 +95,60 @@ class CheckoutController extends Controller
             throw ValidationException::withMessages(['phone' => 'This phone number cannot place orders.']);
         }
 
-        $existing = Order::query()->where('checkout_token', $validated['checkout_token'])->first();
-        if ($existing) {
-            return redirect()->route($existing->phone_verified_at ? 'order.success' : 'order.verify', $existing->public_token);
-        }
-
-        if ($product->variants) {
-            $variant = collect($product->variants)->firstWhere('value', $validated['variant_value']);
-            if (! $variant || (int) ($product->stock ?? 0) < $validated['quantity']) {
-                throw ValidationException::withMessages([
-                    'quantity' => 'The product does not have enough stock for that quantity.',
-                ]);
-            }
-        }
-
         $code = (string) random_int(100000, 999999);
         try {
-            $order = Order::query()->create([
-                'order_number' => 'BK-'.Str::upper(Str::random(10)),
-                'checkout_token' => $validated['checkout_token'],
-                'public_token' => (string) Str::uuid(),
-                'user_id' => $request->user('customer')->id,
-                'product_id' => $product->id,
-                'quantity' => $validated['quantity'],
-                'variant_value' => $validated['variant_value'] ?? null,
-                'customer_name' => $request->user('customer')->name,
-                'phone' => $phone['local'],
-                'phone_e164' => $phone['e164'],
-                'address' => $validated['address'],
-                'total' => $product->currentPrice() * $validated['quantity'],
-                'status' => 'pending',
-                'phone_verification_hash' => Hash::make($code),
-                'phone_verification_expires_at' => now()->addMinutes(10),
-                'city_id' => $validated['city_id'] ?? null,
-                'zone_id' => $validated['zone_id'] ?? null,
-                'area_id' => $validated['area_id'] ?? null,
-            ]);
+            $order = DB::transaction(function () use ($request, $product, $validated, $phone, $code, $stock): Order {
+                $variant = isset($validated['variant_value'])
+                    ? $product->productVariants()->where('value', $validated['variant_value'])->first()
+                    : null;
+                $unitPrice = (float) ($variant?->price_override ?? $product->currentPrice());
+                $quantity = (int) $validated['quantity'];
+                $subtotal = $unitPrice * $quantity;
+
+                $order = Order::query()->create([
+                    'order_number' => 'BK-'.Str::upper(Str::random(10)),
+                    'checkout_token' => $validated['checkout_token'],
+                    'public_token' => (string) Str::uuid(),
+                    'user_id' => $request->user('customer')->id,
+                    'product_id' => $product->id,
+                    'quantity' => $quantity,
+                    'variant_value' => $validated['variant_value'] ?? null,
+                    'customer_name' => $request->user('customer')->name,
+                    'phone' => $phone['local'],
+                    'phone_e164' => $phone['e164'],
+                    'address' => $validated['address'],
+                    'subtotal' => $subtotal,
+                    'delivery_charge' => 0,
+                    'discount_total' => 0,
+                    'total' => $subtotal,
+                    'status' => OrderStatus::Pending,
+                    'phone_verification_hash' => Hash::make($code),
+                    'phone_verification_expires_at' => now()->addMinutes(10),
+                    'city_id' => $validated['city_id'] ?? null,
+                    'zone_id' => $validated['zone_id'] ?? null,
+                    'area_id' => $validated['area_id'] ?? null,
+                ]);
+                $order->statusHistories()->create([
+                    'from' => null,
+                    'to' => OrderStatus::Pending->value,
+                    'actor_id' => $request->user('customer')->id,
+                    'source' => 'customer',
+                    'note' => 'Order placed.',
+                    'created_at' => now(),
+                ]);
+                $order->items()->create([
+                    'product_id' => $product->id,
+                    'variant_id' => $variant?->id,
+                    'product_name' => $product->name,
+                    'variant_value' => $validated['variant_value'] ?? null,
+                    'unit_price' => $unitPrice,
+                    'quantity' => $quantity,
+                    'line_total' => $subtotal,
+                ]);
+                $stock->reserve($order);
+
+                return $order;
+            }, attempts: 3);
         } catch (UniqueConstraintViolationException $exception) {
             $order = Order::query()->where('checkout_token', $validated['checkout_token'])->first();
             if (! $order) {
@@ -113,6 +156,10 @@ class CheckoutController extends Controller
             }
 
             return redirect()->route($order->phone_verified_at ? 'order.success' : 'order.verify', $order->public_token);
+        } catch (StockUnavailableException) {
+            throw ValidationException::withMessages([
+                'quantity' => 'The product does not have enough stock for that quantity.',
+            ]);
         }
 
         try {

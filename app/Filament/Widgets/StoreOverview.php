@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\User;
@@ -29,10 +30,15 @@ class StoreOverview extends BaseWidget
             Stat::make('All orders', Order::query()->count())
                 ->description('Including orders in progress')
                 ->color('gray'),
-            Stat::make('Orders to fulfill', Order::query()->whereIn('status', ['confirmed', 'shipped'])->count())
+            Stat::make('Orders to fulfill', Order::query()->whereIn('status', [
+                OrderStatus::Confirmed->value,
+                OrderStatus::Shipped->value,
+            ])->count())
                 ->description('Confirmed or on the way')
                 ->color('warning'),
-            Stat::make('Delivered sales', '৳'.number_format((float) Order::query()->where('status', 'delivered')->sum('total'), 2))
+            Stat::make('Delivered sales', '৳'.number_format((float) Order::query()
+                ->where('status', OrderStatus::Delivered->value)
+                ->sum('total'), 2))
                 ->description('Cash-on-delivery orders marked delivered')
                 ->color('success'),
         ];

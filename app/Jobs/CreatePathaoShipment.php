@@ -2,7 +2,9 @@
 
 namespace App\Jobs;
 
+use App\Enums\OrderStatus;
 use App\Models\Order;
+use App\Models\OrderItem;
 use CourierHub\DTOs\OrderData;
 use CourierHub\Facades\Courier;
 use Illuminate\Bus\Queueable;
@@ -65,6 +67,14 @@ class CreatePathaoShipment implements ShouldBeUnique, ShouldQueue
             return;
         }
 
+        $items = $order->items()->with('product')->get();
+        $itemDescription = $items->map(fn (OrderItem $item): string => trim(
+            $item->product_name.($item->variant_value ? ' - '.$item->variant_value : '')
+        ))->implode(', ');
+        $itemWeight = max(0.5, (float) $items->sum(
+            fn (OrderItem $item): float => (float) ($item->product?->weight ?? 0.5) * $item->quantity
+        ));
+
         try {
             $response = Courier::driver('pathao')->createOrder(OrderData::from([
                 'merchant_order_id' => $order->order_number,
@@ -72,12 +82,12 @@ class CreatePathaoShipment implements ShouldBeUnique, ShouldQueue
                 'recipient_phone' => $order->phone,
                 'recipient_address' => $order->address,
                 'amount_to_collect' => $order->total,
-                'weight' => 0.5,
+                'weight' => $itemWeight,
                 'city_id' => $order->city_id,
                 'zone_id' => $order->zone_id,
                 'area_id' => $order->area_id,
-                'item_description' => trim(($order->product?->name ?? 'Product').($order->variant_value ? ' - '.$order->variant_value : '')),
-                'item_quantity' => $order->quantity,
+                'item_description' => $itemDescription,
+                'item_quantity' => $items->sum('quantity'),
             ]));
 
             if ($response->tracking_id === '') {
@@ -88,9 +98,9 @@ class CreatePathaoShipment implements ShouldBeUnique, ShouldQueue
                 'courier_name' => 'pathao',
                 'courier_tracking_id' => $response->tracking_id,
                 'courier_booking_status' => 'booked',
-                'status' => 'confirmed',
                 'courier_booking_error' => null,
             ]);
+            $order->transitionTo(OrderStatus::Confirmed, source: 'system');
         } catch (Throwable $exception) {
             report($exception);
             $order->update([

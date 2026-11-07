@@ -9,6 +9,7 @@ use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Validation\ValidationException;
 
 class ProductResource extends Resource
 {
@@ -37,11 +38,12 @@ class ProductResource extends Resource
                     ->live()
                     ->helperText('This controls the option name and the measurement chart shown to customers.'),
                 Forms\Components\TextInput::make('stock')
-                    ->label('Total product quantity available')
-                    ->helperText('One stock count shared across every size or color for this product.')
+                    ->label('Simple product stock')
+                    ->helperText('For products without options. Legacy option products keep their shared pool until every option has a stock count.')
                     ->integer()
                     ->minValue(0)
-                    ->required(fn (Forms\Get $get): bool => in_array($get('product_kind'), ['watch', 'shirt', 'pant'], true)),
+                    ->visible(fn (Forms\Get $get): bool => $get('product_kind') === 'other')
+                    ->dehydrated(fn (Forms\Get $get): bool => $get('product_kind') === 'other'),
                 Forms\Components\Textarea::make('description')
                     ->columnSpanFull(),
                 Forms\Components\TextInput::make('price')
@@ -94,6 +96,19 @@ class ProductResource extends Resource
                             ->searchable()
                             ->required()
                             ->distinct(),
+                        Forms\Components\TextInput::make('sku')
+                            ->label('SKU')
+                            ->maxLength(255),
+                        Forms\Components\TextInput::make('stock')
+                            ->label('Stock for this option')
+                            ->integer()
+                            ->minValue(0)
+                            ->helperText('Leave every option blank to use a legacy shared pool or leave stock untracked; otherwise enter a count for every option.'),
+                        Forms\Components\TextInput::make('price_override')
+                            ->label('Price override')
+                            ->numeric()
+                            ->minValue(0)
+                            ->prefix('৳'),
                         Forms\Components\TextInput::make('chest_cm')->label('Chest (cm)')->numeric()->minValue(0)->visible(fn (Forms\Get $get): bool => $get('../../product_kind') === 'shirt'),
                         Forms\Components\TextInput::make('body_length_cm')->label('Shirt length (cm)')->numeric()->minValue(0)->visible(fn (Forms\Get $get): bool => $get('../../product_kind') === 'shirt'),
                         Forms\Components\TextInput::make('shoulder_cm')->label('Shoulder (cm)')->numeric()->minValue(0)->visible(fn (Forms\Get $get): bool => $get('../../product_kind') === 'shirt'),
@@ -109,7 +124,7 @@ class ProductResource extends Resource
                     ->addActionLabel('Add size or color')
                     ->reorderable()
                     ->columnSpanFull()
-                    ->helperText('Choose the sizes or colors this product comes in. The quantity above is shared by all of these choices.'),
+                    ->helperText('Each option is stored separately. Enter stock for every option, or leave all option stock blank.'),
                 Forms\Components\Toggle::make('active')
                     ->required(),
             ]);
@@ -152,6 +167,32 @@ class ProductResource extends Resource
                     Tables\Actions\DeleteBulkAction::make(),
                 ]),
             ]);
+    }
+
+    public static function prepareVariantInventory(array $data): array
+    {
+        $variants = $data['variants'] ?? [];
+        if (! is_array($variants) || $variants === []) {
+            return $data;
+        }
+
+        $stockCounts = array_map(
+            fn (array $variant): bool => isset($variant['stock']) && $variant['stock'] !== '',
+            $variants,
+        );
+        $trackedCount = count(array_filter($stockCounts));
+
+        if ($trackedCount > 0 && $trackedCount !== count($variants)) {
+            throw ValidationException::withMessages([
+                'variants' => 'Enter a stock count for every option, or leave stock blank for every option.',
+            ]);
+        }
+
+        if ($trackedCount === count($variants)) {
+            $data['stock'] = null;
+        }
+
+        return $data;
     }
 
     public static function getRelations(): array
